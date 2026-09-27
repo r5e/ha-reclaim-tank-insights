@@ -1,0 +1,72 @@
+{#- Reclaim Tank Insights: shared settings, specs and models.
+    https://github.com/r5e/ha-reclaim-tank-insights
+
+    EDIT THE ENTITY IDS BELOW to match your Reclaim Energy integration entities.
+    (Also edit every line marked "EDIT" in packages/reclaim_tank_insights.yaml.) -#}
+
+{%- macro reclaim_entity(name) -%}
+{%- set ids = {
+  'heat_pump_state': 'binary_sensor.reclaim_v2_heat_pump_state',
+  'water_temp':      'sensor.reclaim_v2_water_temperature',
+  'ambient_temp':    'sensor.reclaim_v2_ambient_temperature',
+  'energy':          'sensor.back_garden_reclaim_v2_hot_water_heat_pump_energy_consumption',
+  'power':           'sensor.reclaim_v2_power',
+} -%}
+{{ ids[name] }}
+{%- endmacro -%}
+
+{#- Tank specifications from Reclaim Energy's published tank specification sheet.
+    Dimensions in mm: overall height, diameter, sensor height, hot outlet / heat pump
+    return height, cold inlet / heat pump flow height. Volume is total physical volume. -#}
+{%- macro reclaim_spec(field) -%}
+{%- set specs = {
+  'RE160AGLH':  {'volume': 163, 'height': 1317, 'diameter': 528, 'sensor': 439, 'outlet': 1099, 'inlet': 189, 'material': 'glass'},
+  'RE250AGLH':  {'volume': 259, 'height': 1439, 'diameter': 613, 'sensor': 458, 'outlet': 1212, 'inlet': 196, 'material': 'glass'},
+  'RE315AGLH':  {'volume': 323, 'height': 1765, 'diameter': 617, 'sensor': 560, 'outlet': 1531, 'inlet': 197, 'material': 'glass'},
+  'RE400AGLH':  {'volume': 420, 'height': 1699, 'diameter': 701, 'sensor': 556, 'outlet': 1447, 'inlet': 221, 'material': 'glass'},
+  'APS160TH':   {'volume': 180, 'height': 1200, 'diameter': 565, 'sensor': 343, 'outlet': 940,  'inlet': 196, 'material': 'stainless'},
+  'APS250TH':   {'volume': 280, 'height': 1800, 'diameter': 565, 'sensor': 608, 'outlet': 1588, 'inlet': 196, 'material': 'stainless'},
+  'APS315TH':   {'volume': 330, 'height': 2090, 'diameter': 565, 'sensor': 730, 'outlet': 1850, 'inlet': 210, 'material': 'stainless'},
+  'APS315SH':   {'volume': 333, 'height': 1490, 'diameter': 685, 'sensor': 470, 'outlet': 1205, 'inlet': 210, 'material': 'stainless'},
+  'APS400TH':   {'volume': 420, 'height': 1850, 'diameter': 680, 'sensor': 608, 'outlet': 1588, 'inlet': 196, 'material': 'stainless'},
+  'EWA-250HPT': {'volume': 250, 'height': 1620, 'diameter': 620, 'sensor': 574, 'outlet': 1184, 'inlet': 163, 'material': 'stainless'},
+  'EWA-315HPT': {'volume': 315, 'height': 1990, 'diameter': 620, 'sensor': 762, 'outlet': 1538, 'inlet': 163, 'material': 'stainless'},
+} -%}
+{%- set sel = states('input_select.reclaim_tank_model') -%}
+{%- set key = (specs.keys() | select('in', sel) | list + ['RE315AGLH'])[0] -%}
+{{ specs[key][field] }}
+{%- endmacro -%}
+
+{#- User settings, with defaults when left at 0 / blank. -#}
+{%- macro reclaim_setting(name) -%}
+{%- if name == 'litres_per_shower' -%}
+  {%- set v = states('input_number.reclaim_litres_per_shower') | float(0) -%}
+  {{ v if v > 0 else 35 }}
+{%- elif name == 'mains_temp' -%}
+  {%- set v = states('input_number.reclaim_mains_temperature') | float(0) -%}
+  {{ v if v > 0 else 18 }}
+{%- elif name == 'price_entity' -%}
+  {%- set v = states('input_text.reclaim_price_entity') | trim -%}
+  {%- if v | lower == 'none' -%}none
+  {%- elif v not in ['', 'unknown', 'unavailable'] -%}{{ v }}
+  {%- else -%}{{ (integration_entities('amberelectric') | select('search', 'general_price') | list + ['none'])[0] }}
+  {%- endif -%}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Heat needed for a full heat, from mains temperature to 60 C, in kWh. -#}
+{%- macro reclaim_full_heat_kwh() -%}
+{{ (reclaim_spec('volume') | float(323) * 4.186 * (60 - reclaim_setting('mains_temp') | float(18)) / 3600) | round(2) }}
+{%- endmacro -%}
+
+{#- Heat pump efficiency (COP) against ambient temperature. Calibrated on an
+    EHPE-4550P-A; consistent with its rated COP of 6.02 at 32.6 C ambient. -#}
+{%- macro reclaim_cop(ambient) -%}
+{{ ([[3.1 + 0.097 * (ambient | float(20)), 3.0] | max, 6.5] | min) | round(2) }}
+{%- endmacro -%}
+
+{#- Current electricity price in AUD/kWh, or 0 if pricing is off / unavailable. -#}
+{%- macro reclaim_price() -%}
+{%- set p = reclaim_setting('price_entity') -%}
+{{ 0 if p == 'none' else (states(p) | float(0)) }}
+{%- endmacro -%}

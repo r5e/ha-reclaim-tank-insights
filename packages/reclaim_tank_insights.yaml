@@ -1,0 +1,489 @@
+# Reclaim Tank Insights (unofficial) - v0.1.0
+# https://github.com/r5e/ha-reclaim-tank-insights
+#
+# A companion to the Reclaim Energy integration by David Collett:
+# https://github.com/david-collett/reclaimenergy
+#
+# Estimates the usable hot water in a Reclaim heat pump tank from the single
+# built-in tank sensor, the heat pump's energy use and ambient temperature.
+#
+# Requires custom_templates/reclaim_tank.jinja. Entity IDs are set there, plus every
+# line below marked "EDIT" (triggers cannot read IDs from the shared file).
+
+# ---------------------------------------------------------------------------
+# Settings (set these in the UI after installing)
+# ---------------------------------------------------------------------------
+input_select:
+  reclaim_tank_model:
+    name: Reclaim tank model
+    icon: mdi:water-boiler
+    options:
+      - "Not set (assumes RE315AGLH)"
+      - "RE160AGLH - glass-lined, 163 L"
+      - "RE250AGLH - glass-lined, 259 L"
+      - "RE315AGLH / AP315AGLH - glass-lined, 323 L"
+      - "RE400AGLH - glass-lined, 420 L"
+      - "APS160TH - stainless, 180 L"
+      - "APS250TH - stainless, 280 L"
+      - "APS315TH - stainless tall, 330 L"
+      - "APS315SH - stainless squat, 333 L"
+      - "APS400TH - stainless, 420 L"
+      - "EWA-250HPT - stainless, 250 L"
+      - "EWA-315HPT - stainless, 315 L"
+
+input_number:
+  reclaim_litres_per_shower:
+    name: Reclaim litres of tank water per shower (0 = default 35)
+    icon: mdi:shower-head
+    min: 0
+    max: 200
+    step: 1
+    mode: box
+  reclaim_mains_temperature:
+    name: Reclaim mains water temperature (0 = default 18 C)
+    icon: mdi:thermometer-water
+    min: 0
+    max: 35
+    step: 0.5
+    mode: box
+
+input_text:
+  reclaim_price_entity:
+    name: Reclaim price entity (blank = auto-detect Amber, none = off)
+    icon: mdi:currency-usd
+    max: 120
+
+input_datetime:
+  reclaim_anode_last_checked:
+    name: Reclaim anode last checked or replaced
+    icon: mdi:wrench-clock
+    has_date: true
+    has_time: false
+  reclaim_relief_valve_last_operated:
+    name: Reclaim relief valve last operated
+    icon: mdi:valve
+    has_date: true
+    has_time: false
+
+input_boolean:
+  reclaim_detailed_logging:
+    name: Reclaim detailed logging
+    icon: mdi:file-document-edit-outline
+
+# ---------------------------------------------------------------------------
+# Energy used by the heat pump today
+# ---------------------------------------------------------------------------
+utility_meter:
+  reclaim_heat_pump_energy_today:
+    name: Reclaim heat pump energy today
+    unique_id: reclaim_heat_pump_energy_today
+    source: sensor.back_garden_reclaim_v2_hot_water_heat_pump_energy_consumption  # EDIT: energy entity
+    cycle: daily
+
+template:
+  # -------------------------------------------------------------------------
+  # Tank specification (from the selected model) and derived constants
+  # -------------------------------------------------------------------------
+  - sensor:
+      - name: "Reclaim tank spec"
+        unique_id: reclaim_tank_spec
+        unit_of_measurement: L
+        icon: mdi:water-boiler
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_spec %}
+          {{ reclaim_spec('volume') }}
+        attributes:
+          height_mm: "{% from 'reclaim_tank.jinja' import reclaim_spec %}{{ reclaim_spec('height') | int }}"
+          diameter_mm: "{% from 'reclaim_tank.jinja' import reclaim_spec %}{{ reclaim_spec('diameter') | int }}"
+          sensor_mm: "{% from 'reclaim_tank.jinja' import reclaim_spec %}{{ reclaim_spec('sensor') | int }}"
+          outlet_mm: "{% from 'reclaim_tank.jinja' import reclaim_spec %}{{ reclaim_spec('outlet') | int }}"
+          inlet_mm: "{% from 'reclaim_tank.jinja' import reclaim_spec %}{{ reclaim_spec('inlet') | int }}"
+          material: "{% from 'reclaim_tank.jinja' import reclaim_spec %}{{ reclaim_spec('material') }}"
+          full_heat_kwh: "{% from 'reclaim_tank.jinja' import reclaim_full_heat_kwh %}{{ reclaim_full_heat_kwh() | float }}"
+          price_entity: "{% from 'reclaim_tank.jinja' import reclaim_setting %}{{ reclaim_setting('price_entity') }}"
+
+      - name: "Reclaim heat pump efficiency estimate"
+        unique_id: reclaim_heat_pump_efficiency_estimate
+        icon: mdi:heat-pump-outline
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity, reclaim_cop %}
+          {{ reclaim_cop(states(reclaim_entity('ambient_temp')) | float(20)) | float | round(1) }}
+
+      # Charge estimated from the tank sensor (plus the draws counter).
+      # The sensor sits about a third of the way up every Reclaim tank, so the curve
+      # shape carries across models. 100 % only when high AND no draws since full.
+      - name: "Reclaim tank charge idle estimate"
+        unique_id: reclaim_tank_charge_idle_estimate
+        unit_of_measurement: "%"
+        availability: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity %}
+          {{ has_value(reclaim_entity('water_temp')) }}
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity %}
+          {% set w = states(reclaim_entity('water_temp')) | float(0) %}
+          {% set draws = states('sensor.reclaim_tank_draws_since_full') | int(0) %}
+          {% if w >= 57 and draws == 0 %}
+            100
+          {% else %}
+            {% set pts = [[21,0],[22.5,10],[25,30],[30,35],[35,45],[45,60],[52,72],[57,85],[59,90]] %}
+            {% set ns = namespace(v=0) %}
+            {% if w >= pts[-1][0] %}
+              {% set ns.v = pts[-1][1] %}
+            {% elif w > pts[0][0] %}
+              {% for i in range(pts | length - 1) %}
+                {% set a = pts[i] %}{% set b = pts[i + 1] %}
+                {% if a[0] <= w < b[0] %}
+                  {% set ns.v = a[1] + (w - a[0]) * (b[1] - a[1]) / (b[0] - a[0]) %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {{ ns.v | round(0) | int }}
+          {% endif %}
+
+  # -------------------------------------------------------------------------
+  # Snapshot at the start of each heating run
+  # -------------------------------------------------------------------------
+  - trigger:
+      - trigger: state
+        entity_id: binary_sensor.reclaim_v2_heat_pump_state  # EDIT: heat pump state entity
+        from: "off"
+        to: "on"
+    sensor:
+      - name: "Reclaim tank run start"
+        unique_id: reclaim_tank_run_start
+        unit_of_measurement: "%"
+        icon: mdi:play-circle-outline
+        state: "{{ states('sensor.reclaim_tank_charge_idle_estimate') | float(0) }}"
+        attributes:
+          started: "{{ now().isoformat() }}"
+          energy_start: >
+            {% from 'reclaim_tank.jinja' import reclaim_entity %}
+            {{ states(reclaim_entity('energy')) | float(0) }}
+          start_temp: >
+            {% from 'reclaim_tank.jinja' import reclaim_entity %}
+            {{ states(reclaim_entity('water_temp')) }}
+          start_ambient: >
+            {% from 'reclaim_tank.jinja' import reclaim_entity %}
+            {{ states(reclaim_entity('ambient_temp')) }}
+          draws_at_start: "{{ states('sensor.reclaim_tank_draws_since_full') | int(0) }}"
+
+  # -------------------------------------------------------------------------
+  # Time of the last completed full heat
+  # -------------------------------------------------------------------------
+  - trigger:
+      - trigger: state
+        entity_id: binary_sensor.reclaim_v2_heat_pump_state  # EDIT: heat pump state entity
+        from: "on"
+        to: "off"
+    condition:
+      - condition: template
+        value_template: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity %}
+          {{ states(reclaim_entity('water_temp')) | float(0) > 57 }}
+    sensor:
+      - name: "Reclaim tank last full"
+        unique_id: reclaim_tank_last_full
+        device_class: timestamp
+        icon: mdi:water-check
+        state: "{{ now().isoformat() }}"
+
+  # -------------------------------------------------------------------------
+  # Draws since the last full heat (tank sensor drops of 3 C or more while idle)
+  # -------------------------------------------------------------------------
+  - trigger:
+      - trigger: state
+        entity_id: sensor.reclaim_v2_water_temperature  # EDIT: tank water temperature entity
+        id: temp
+      - trigger: state
+        entity_id: sensor.reclaim_tank_last_full
+        id: full
+    sensor:
+      - name: "Reclaim tank draws since full"
+        unique_id: reclaim_tank_draws_since_full
+        icon: mdi:water-minus
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity %}
+          {% set c = this.state | int(0) %}
+          {% if trigger.id == 'full' %}
+            0
+          {% else %}
+            {% set w = trigger.to_state.state | float(none) %}
+            {% set ref = this.attributes.get('ref', w) | float(0) %}
+            {% set running = is_state(reclaim_entity('heat_pump_state'), 'on') %}
+            {% if w is not none and not running and w <= ref - 3 %}{{ c + 1 }}{% else %}{{ c }}{% endif %}
+          {% endif %}
+        attributes:
+          ref: >
+            {% from 'reclaim_tank.jinja' import reclaim_entity %}
+            {% set ref = this.attributes.get('ref', 0) | float(0) %}
+            {% if trigger.id == 'full' %}
+              {{ states(reclaim_entity('water_temp')) | float(0) }}
+            {% else %}
+              {% set w = trigger.to_state.state | float(none) %}
+              {% if w is none %}{{ ref }}
+              {% elif is_state(reclaim_entity('heat_pump_state'), 'on') or w > ref or w <= ref - 3 %}{{ w }}
+              {% else %}{{ ref }}{% endif %}
+            {% endif %}
+
+  # -------------------------------------------------------------------------
+  # Running cost at the live price (today, and per run)
+  # -------------------------------------------------------------------------
+  - trigger:
+      - trigger: state
+        entity_id: sensor.back_garden_reclaim_v2_hot_water_heat_pump_energy_consumption  # EDIT: energy entity
+        id: energy
+      - trigger: time
+        at: "00:00:00"
+        id: midnight
+      - trigger: state
+        entity_id: binary_sensor.reclaim_v2_heat_pump_state  # EDIT: heat pump state entity
+        from: "off"
+        to: "on"
+        id: run_start
+    sensor:
+      - name: "Reclaim heat pump cost today"
+        unique_id: reclaim_heat_pump_cost_today
+        unit_of_measurement: AUD
+        icon: mdi:cash
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_price %}
+          {% set c = this.state | float(0) %}
+          {% if trigger.id == 'midnight' %}
+            0
+          {% elif trigger.id == 'energy' %}
+            {% set a = (trigger.from_state.state | float(none)) if trigger.from_state else none %}
+            {% set b = (trigger.to_state.state | float(none)) if trigger.to_state else none %}
+            {% if a is not none and b is not none and 0 < b - a < 1 %}
+              {{ (c + (b - a) * (reclaim_price() | float(0))) | round(4) }}
+            {% else %}{{ c }}{% endif %}
+          {% else %}
+            {{ c }}
+          {% endif %}
+        attributes:
+          run_cost: >
+            {% from 'reclaim_tank.jinja' import reclaim_price %}
+            {% set r = this.attributes.get('run_cost', 0) | float(0) %}
+            {% if trigger.id == 'run_start' %}
+              0
+            {% elif trigger.id == 'energy' %}
+              {% set a = (trigger.from_state.state | float(none)) if trigger.from_state else none %}
+              {% set b = (trigger.to_state.state | float(none)) if trigger.to_state else none %}
+              {% if a is not none and b is not none and 0 < b - a < 1 %}
+                {{ (r + (b - a) * (reclaim_price() | float(0))) | round(4) }}
+              {% else %}{{ r }}{% endif %}
+            {% else %}
+              {{ r }}
+            {% endif %}
+
+  # -------------------------------------------------------------------------
+  # The main figures
+  # -------------------------------------------------------------------------
+  - sensor:
+      - name: "Reclaim tank charge"
+        unique_id: reclaim_tank_charge
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:water-boiler
+        availability: "{{ has_value('sensor.reclaim_tank_charge_idle_estimate') }}"
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity, reclaim_full_heat_kwh %}
+          {% set idle = states('sensor.reclaim_tank_charge_idle_estimate') | float(0) %}
+          {% if is_state(reclaim_entity('heat_pump_state'), 'on')
+                and has_value('sensor.reclaim_tank_run_start') %}
+            {% set start = states('sensor.reclaim_tank_run_start') | float(0) %}
+            {% set e0 = state_attr('sensor.reclaim_tank_run_start', 'energy_start') | float(0) %}
+            {% set e = states(reclaim_entity('energy')) | float(e0) %}
+            {% set cop = states('sensor.reclaim_heat_pump_efficiency_estimate') | float(4.5) %}
+            {% set full = reclaim_full_heat_kwh() | float(20) %}
+            {% set est = start + (e - e0) * cop / full * 100 %}
+            {{ [[est, idle] | max, 99] | min | round(0) }}
+          {% else %}
+            {{ idle | round(0) }}
+          {% endif %}
+
+      - name: "Reclaim tank bars"
+        unique_id: reclaim_tank_bars
+        state: >
+          {% set c = states('sensor.reclaim_tank_charge') | float(0) %}
+          {{ 5 if c >= 90 else 4 if c >= 70 else 3 if c >= 50 else 2 if c >= 30 else 1 if c >= 10 else 0 }}
+
+      - name: "Reclaim tank litres"
+        unique_id: reclaim_tank_litres
+        unit_of_measurement: L
+        icon: mdi:water
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_spec %}
+          {{ (states('sensor.reclaim_tank_charge') | float(0) / 100 * reclaim_spec('volume') | float(323)) | round(0) }}
+
+      - name: "Reclaim tank showers left"
+        unique_id: reclaim_tank_showers_left
+        icon: mdi:shower
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_setting %}
+          {{ (states('sensor.reclaim_tank_litres') | float(0) / reclaim_setting('litres_per_shower') | float(35)) | round(0, 'floor') | int }}
+
+      - name: "Reclaim tank top-up energy"
+        unique_id: reclaim_tank_topup_energy
+        unit_of_measurement: kWh
+        icon: mdi:lightning-bolt
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_full_heat_kwh %}
+          {% set c = states('sensor.reclaim_tank_charge') | float(0) %}
+          {% set cop = states('sensor.reclaim_heat_pump_efficiency_estimate') | float(4.5) %}
+          {{ ((100 - c) / 100 * (reclaim_full_heat_kwh() | float(20)) / cop) | round(2) }}
+
+      - name: "Reclaim tank top-up cost"
+        unique_id: reclaim_tank_topup_cost
+        unit_of_measurement: AUD
+        icon: mdi:cash-plus
+        availability: >
+          {% from 'reclaim_tank.jinja' import reclaim_setting %}
+          {{ reclaim_setting('price_entity') != 'none' }}
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_price %}
+          {{ (states('sensor.reclaim_tank_top_up_energy') | float(0) * reclaim_price() | float(0)) | round(2) }}
+
+      - name: "Reclaim heat pump run energy"
+        unique_id: reclaim_heat_pump_run_energy
+        unit_of_measurement: kWh
+        icon: mdi:lightning-bolt-outline
+        availability: "{{ has_value('sensor.reclaim_tank_run_start') }}"
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity %}
+          {% set e0 = state_attr('sensor.reclaim_tank_run_start', 'energy_start') | float(0) %}
+          {% set e = states(reclaim_entity('energy')) | float(e0) %}
+          {{ [e - e0, 0] | max | round(2) }}
+
+      - name: "Reclaim tank status"
+        unique_id: reclaim_tank_status
+        icon: mdi:information-outline
+        state: >
+          {% from 'reclaim_tank.jinja' import reclaim_entity %}
+          {% set c = states('sensor.reclaim_tank_charge') | float(0) %}
+          {% if is_state(reclaim_entity('heat_pump_state'), 'on') %}Heating
+          {% elif c >= 90 %}Full
+          {% elif c >= 50 %}Good
+          {% elif c >= 25 %}Getting low
+          {% elif c >= 10 %}Low
+          {% else %}Empty{% endif %}
+        attributes:
+          confidence: >
+            {% from 'reclaim_tank.jinja' import reclaim_entity %}
+            {% set w = states(reclaim_entity('water_temp')) | float(0) %}
+            {{ 'lower' if (22 < w < 57 and not is_state(reclaim_entity('heat_pump_state'), 'on')) else 'normal' }}
+
+      # ---------------------------------------------------------------------
+      # Maintenance reminders (follow the intervals in your Reclaim manual)
+      # ---------------------------------------------------------------------
+      - name: "Reclaim anode check due"
+        unique_id: reclaim_anode_check_due
+        device_class: date
+        icon: mdi:wrench-clock
+        availability: >
+          {% from 'reclaim_tank.jinja' import reclaim_spec %}
+          {{ reclaim_spec('material') == 'glass'
+             and states('input_datetime.reclaim_anode_last_checked') > '1971' }}
+        state: >
+          {% set d = strptime(states('input_datetime.reclaim_anode_last_checked'), '%Y-%m-%d') %}
+          {{ (d + timedelta(days=5 * 365)).date().isoformat() }}
+
+      - name: "Reclaim relief valve due"
+        unique_id: reclaim_relief_valve_due
+        device_class: date
+        icon: mdi:valve
+        availability: "{{ states('input_datetime.reclaim_relief_valve_last_operated') > '1971' }}"
+        state: >
+          {% set d = strptime(states('input_datetime.reclaim_relief_valve_last_operated'), '%Y-%m-%d') %}
+          {{ (d + timedelta(days=182)).date().isoformat() }}
+
+  - binary_sensor:
+      - name: "Reclaim maintenance due"
+        unique_id: reclaim_maintenance_due
+        device_class: problem
+        icon: mdi:tools
+        state: >
+          {% set today = now().date().isoformat() %}
+          {% set soon = (now() + timedelta(days=30)).date().isoformat() %}
+          {% set a = states('sensor.reclaim_anode_check_due') %}
+          {% set v = states('sensor.reclaim_relief_valve_due') %}
+          {{ (a not in ['unknown', 'unavailable'] and a <= soon)
+             or (v not in ['unknown', 'unavailable'] and v <= today) }}
+
+      - name: "Reclaim full heat overdue"
+        unique_id: reclaim_full_heat_overdue
+        device_class: problem
+        icon: mdi:bacteria-outline
+        state: >
+          {% set lf = states('sensor.reclaim_tank_last_full') %}
+          {{ lf not in ['unknown', 'unavailable'] and (now() - as_datetime(lf)).days >= 7 }}
+
+# ---------------------------------------------------------------------------
+# Optional CSV logging (see README: needs the File integration set up first).
+# Each automation does nothing until its notify entity exists.
+# ---------------------------------------------------------------------------
+automation:
+  - id: reclaim_tank_insights_run_log
+    alias: "Reclaim tank insights: log each heating run"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.reclaim_v2_heat_pump_state  # EDIT: heat pump state entity
+        from: "on"
+        to: "off"
+    conditions:
+      - condition: template
+        value_template: "{{ states.notify.reclaim_runs is not none }}"
+    actions:
+      - delay: "00:00:10"
+      - action: notify.send_message
+        target:
+          entity_id: notify.reclaim_runs
+        data:
+          message: >
+            {% from 'reclaim_tank.jinja' import reclaim_entity, reclaim_spec %}
+            {% set rs = 'sensor.reclaim_tank_run_start' %}
+            {{ state_attr(rs, 'started') }},{{ now().isoformat() }},{{ state_attr(rs, 'start_temp') }},{{ states(reclaim_entity('water_temp')) }},{{ states('sensor.reclaim_heat_pump_run_energy') }},{{ state_attr(rs, 'start_ambient') }},{{ states(reclaim_entity('ambient_temp')) }},{{ state_attr('sensor.reclaim_heat_pump_cost_today', 'run_cost') }},{{ state_attr(rs, 'draws_at_start') }},{{ states(rs) }},{{ 'yes' if states(reclaim_entity('water_temp')) | float(0) >= 57 else 'no' }},{{ reclaim_spec('volume') }}
+
+  - id: reclaim_tank_insights_daily_log
+    alias: "Reclaim tank insights: daily summary"
+    triggers:
+      - trigger: time
+        at: "23:59:30"
+    conditions:
+      - condition: template
+        value_template: "{{ states.notify.reclaim_daily is not none }}"
+    actions:
+      - action: notify.send_message
+        target:
+          entity_id: notify.reclaim_daily
+        data:
+          message: >
+            {{ now().date().isoformat() }},{{ states('sensor.reclaim_heat_pump_energy_today') }},{{ states('sensor.reclaim_heat_pump_cost_today') }},{{ states('sensor.reclaim_tank_charge') }},{{ states('sensor.reclaim_tank_draws_since_full') }},{{ states('sensor.reclaim_tank_last_full') }}
+
+  - id: reclaim_tank_insights_detail_log
+    alias: "Reclaim tank insights: detailed sensor log"
+    mode: queued
+    max: 100
+    triggers:
+      - trigger: state
+        entity_id:  # EDIT: your Reclaim sensor entities
+          - binary_sensor.reclaim_v2_heat_pump_state
+          - sensor.reclaim_v2_water_temperature
+          - sensor.reclaim_v2_ambient_temperature
+          - sensor.reclaim_v2_inlet_temperature
+          - sensor.reclaim_v2_outlet_temperature
+          - sensor.reclaim_v2_compressor_speed
+          - sensor.reclaim_v2_water_pump_speed
+          - sensor.reclaim_v2_power
+    conditions:
+      - condition: state
+        entity_id: input_boolean.reclaim_detailed_logging
+        state: "on"
+      - condition: template
+        value_template: "{{ states.notify.reclaim_detail is not none }}"
+    actions:
+      - action: notify.send_message
+        target:
+          entity_id: notify.reclaim_detail
+        data:
+          message: "{{ now().isoformat() }},{{ trigger.entity_id }},{{ trigger.to_state.state if trigger.to_state else '' }}"

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Reclaim Tank Insights logo">
+  <defs>
+    <clipPath id="tank"><rect x="72" y="104" width="72" height="128" rx="30" ry="14"/></clipPath>
+    <clipPath id="lens"><circle cx="120" cy="166" r="34"/></clipPath>
+  </defs>
+  <!-- tile -->
+  <rect x="4" y="4" width="248" height="248" rx="48" fill="#f5f7fa" stroke="#dde3ea" stroke-width="2"/>
+  <!-- pipes (left, like the card) -->
+  <path d="M58 72H46V124H74" fill="none" stroke="#e53935" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M58 46H32V214H74" fill="none" stroke="#1e88e5" stroke-width="6" stroke-linejoin="round"/>
+  <!-- tank layers, faint -->
+  <g clip-path="url(#tank)" opacity="0.28">
+    <rect x="72" y="104" width="72" height="64" fill="#e53935"/>
+    <rect x="72" y="168" width="72" height="16" fill="#fb8c00"/>
+    <rect x="72" y="184" width="72" height="48" fill="#1e88e5"/>
+  </g>
+  <!-- tank outline -->
+  <rect x="72" y="104" width="72" height="128" rx="30" ry="14" fill="none" stroke="#37474f" stroke-width="6"/>
+  <!-- heat pump -->
+  <rect x="58" y="24" width="104" height="66" rx="8" fill="#f5f7fa" stroke="#37474f" stroke-width="6"/>
+  <circle cx="126" cy="57" r="22" fill="none" stroke="#37474f" stroke-width="5"/>
+  <g fill="#37474f">
+    <ellipse cx="126" cy="46" rx="5.5" ry="10.5" transform="rotate(0 126 57) rotate(28 126 46)"/>
+    <ellipse cx="126" cy="46" rx="5.5" ry="10.5" transform="rotate(90 126 57) rotate(28 126 46)"/>
+    <ellipse cx="126" cy="46" rx="5.5" ry="10.5" transform="rotate(180 126 57) rotate(28 126 46)"/>
+    <ellipse cx="126" cy="46" rx="5.5" ry="10.5" transform="rotate(270 126 57) rotate(28 126 46)"/>
+    <circle cx="126" cy="57" r="4.5"/>
+  </g>
+  <circle cx="74" cy="38" r="5" fill="#43a047"/>
+  <!-- magnifier: lens shows the layers clearly -->
+  <g clip-path="url(#lens)">
+    <circle cx="120" cy="166" r="34" fill="#ffffff"/>
+    <g clip-path="url(#tank)">
+      <rect x="72" y="104" width="72" height="64" fill="#e53935"/>
+      <rect x="72" y="168" width="72" height="16" fill="#fb8c00"/>
+      <rect x="72" y="184" width="72" height="48" fill="#1e88e5"/>
+    </g>
+    <rect x="72" y="104" width="72" height="128" rx="30" ry="14" fill="none" stroke="#37474f" stroke-width="6"/>
+  </g>
+  <line x1="145" y1="191" x2="182" y2="228" stroke="#37474f" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="120" cy="166" r="34" fill="none" stroke="#37474f" stroke-width="8"/>
+  <path d="M100 152 A24 24 0 0 1 114 140" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+</svg>
