@@ -1,4 +1,4 @@
-# Reclaim Tank Insights (unofficial) - v0.1.0
+# Reclaim Tank Insights (unofficial) - v0.2.0
 # https://github.com/r5e/ha-reclaim-tank-insights
 #
 # A companion to the Reclaim Energy integration by David Collett:
@@ -72,7 +72,15 @@ input_boolean:
 
 # ---------------------------------------------------------------------------
 # Energy used by the heat pump today
+# (the unit is set explicitly, so HA doesn't record a blank unit before the
+#  first heating run and then raise a "unit has changed" repair)
 # ---------------------------------------------------------------------------
+homeassistant:
+  customize:
+    sensor.reclaim_heat_pump_energy_today:
+      unit_of_measurement: kWh
+      device_class: energy
+
 utility_meter:
   reclaim_heat_pump_energy_today:
     name: Reclaim heat pump energy today

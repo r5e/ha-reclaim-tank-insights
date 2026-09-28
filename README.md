@@ -2,15 +2,16 @@
 
 # Reclaim Tank Insights for Home Assistant (unofficial)
 
-> **Status: experimental (v0.1.0).** The model is calibrated from one household so far.
+> **Status: experimental (v0.2.0).** The model is calibrated from one household so far.
 > Feedback and shared run data are very welcome (see [Help improve the model](#help-improve-the-model)).
 
 A companion to the [Reclaim Energy integration](https://github.com/david-collett/reclaimenergy)
 by David Collett. It turns the Reclaim heat pump's data into an estimate of **how much hot water
 is actually left in your tank**, with a dashboard card that draws your tank and heat pump.
 
-![Reclaim tank card](docs/card.png)
-<img width="741" height="691" alt="image" src="https://github.com/user-attachments/assets/199ab90b-bd62-4ab7-baa6-823145fcd17e" />
+<img src="docs/card.png" alt="Reclaim tank card" width="371">
+<img width="370" alt="Reclaim tank card, later version" src="https://github.com/user-attachments/assets/199ab90b-bd62-4ab7-baa6-823145fcd17e" />
+
 (note some progress shown between the 2 images while things are developing)
 
 Not affiliated with or endorsed by Reclaim Energy.
@@ -79,7 +80,7 @@ tank specification sheet.
 
 - Home Assistant 2026.9 or later
 - The [Reclaim Energy integration](https://github.com/david-collett/reclaimenergy), set up and working
-- [button-card](https://github.com/custom-cards/button-card), installed through HACS (for the dashboard card)
+- [button-card](https://github.com/custom-cards/button-card) and [apexcharts-card](https://github.com/RomRider/apexcharts-card), both installed through HACS (Frontend), for the dashboard card
 - Packages enabled in `configuration.yaml`
 
 ## Installation
@@ -143,18 +144,27 @@ In **Settings > Devices & services > Helpers**, set:
 ### 6. Add the card
 
 Add a **Manual** card to your dashboard and paste the contents of `cards/reclaim-tank-card.yaml`.
-Set `show_heat_pump: false` for a narrower, tank-only card.
+
+- Edit the `variables` at the top if your entity IDs differ, plus the three lines marked
+  `# EDIT` (the boost button and the chart can't read the variables).
+- Set `show_heat_pump: false` for a narrower, tank-only card.
 
 **What the card shows:**
 
 - **The tank,** drawn to your model's real proportions, with five layers that fill from the top
-  down: red for hot water, orange for the transition band, pale blue for cold water. When the
-  bottom layer isn't hot, it's tinted by the real tank sensor (blue, green or yellow).
-- **A thermometer and arrow** marking where the real tank sensor sits.
-- **The heat pump** above the tank. While it runs, the fan spins and the pipes light up: red for
-  the hot return to the tank top, blue for the flow from the tank bottom.
+  down: red for hot water, orange for the transition band, blue for cold water. The layer the
+  real tank sensor sits in is tinted by its reading (blue, green or yellow), and the reading
+  itself is shown inside the tank, beside the sensor's thermometer marker.
+- **The heat pump** above the tank. While it runs, the fan spins and the pipes animate in the
+  water's real direction: cold water up from the tank bottom (blue), hot water back into the
+  top (red).
+- **A Boost button** (top right), which starts or cancels a boost heat after confirmation.
 - **The figures:** charge, showers left, litres, top-up energy and cost, draws since full, heat
   pump power and efficiency, run energy and cost, today's totals, plus any warnings.
+- **A 24-hour chart:** estimated charge (%), the tank sensor (°C) and heating periods on one
+  timeline, so each draw and each heat is visible at a glance.
+
+The text uses your theme's standard font sizes, so it matches the cards around it.
 
 ## Optional: CSV logging
 

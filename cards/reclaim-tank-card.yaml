@@ -1,6 +1,7 @@
-# Reclaim Tank Insights card - v0.1.0
-# Requires button-card (HACS > Frontend > "button-card").
-# Add as a Manual card. Edit the variables to match your entity IDs.
+# Reclaim Tank Insights card - v0.2.0
+# Requires button-card and apexcharts-card (both from HACS > Frontend).
+# Add as a Manual card. Edit the variables, plus the lines marked EDIT further down
+# (the boost button and the chart can't read the variables).
 type: custom:button-card
 entity: sensor.reclaim_tank_charge
 show_name: false
@@ -13,16 +14,31 @@ variables:
   power_entity: sensor.reclaim_v2_power
 extra_styles: |
   @keyframes hwspin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes hwup { from { background-position: 0 0; } to { background-position: 0 -12px; } }
+  @keyframes hwdown { from { background-position: 0 0; } to { background-position: 0 12px; } }
+  @keyframes hwleft { from { background-position: 0 0; } to { background-position: -12px 0; } }
+  @keyframes hwright { from { background-position: 0 0; } to { background-position: 12px 0; } }
 styles:
   card:
     - padding: 16px
+    - position: relative
+  custom_fields:
+    boost:
+      - position: absolute
+      - top: 10px
+      - right: 10px
+      - z-index: 1
+      - width: auto
+      - min-width: 100px
+    graph:
+      - margin-top: 8px
   grid:
-    - grid-template-areas: '"battery info"'
+    - grid-template-areas: '"battery info" "graph graph"'
     - grid-template-columns: >
         [[[
           const s = states['sensor.reclaim_tank_spec']?.attributes || {};
           const tw = Math.max(46, Math.min(96, Math.round(170 * (Number(s.diameter_mm) || 617) / (Number(s.height_mm) || 1765))));
-          return (22 + tw + 30) + 'px 1fr';
+          return (22 + tw + 30) + 'px minmax(0, 1fr)';
         ]]]
     - align-items: center
 custom_fields:
@@ -35,7 +51,7 @@ custom_fields:
       const bars = Number(states['sensor.reclaim_tank_bars']?.state) || 0;
       const heating = states[variables.heat_pump_state_entity]?.state === 'on';
       const w = Number(states[variables.water_temp_entity]?.state) || 0;
-      const bottomCold = w < 25 ? 'rgba(30,136,229,0.6)' : w < 35 ? 'rgba(67,160,71,0.6)' : 'rgba(253,216,53,0.65)';
+      const sensorTint = w < 25 ? 'rgba(30,136,229,0.6)' : w < 35 ? 'rgba(67,160,71,0.6)' : 'rgba(253,216,53,0.65)';
       const line = 'var(--primary-text-color)';
       const hot = '#e53935', cold = '#1e88e5', idle = 'rgba(128,128,128,0.45)';
       // Tank drawn to the selected model's real proportions
@@ -46,27 +62,43 @@ custom_fields:
       const retY = tankT + Math.round(tankH * (1 - omm / hmm));   // hot outlet / heat pump return
       const flowY = tankT + Math.round(tankH * (1 - imm / hmm));  // cold inlet / heat pump flow
       const senY = tankT + Math.round(tankH * (1 - smm / hmm));   // tank sensor
-      const pipe = (l, t, wd, h, c) =>
-        `<div style="position:absolute;left:${l}px;top:${t}px;width:${wd}px;height:${h}px;background:${c};"></div>`;
+      const pipe = (l, t, wd, h, c, dir) => {
+        let bg = `background:${c};`;
+        if (dir && heating) {
+          const g = (dir === 'hwup' || dir === 'hwdown') ? 'to bottom' : 'to right';
+          bg = `background:repeating-linear-gradient(${g}, transparent 0 7px, rgba(255,255,255,0.6) 7px 12px), ${c};
+                animation:${dir} 0.6s linear infinite;`;
+        }
+        return `<div style="position:absolute;left:${l}px;top:${t}px;width:${wd}px;height:${h}px;${bg}"></div>`;
+      };
+
       let out = `<div style="position:relative;width:${tankL + tankW + 24}px;height:${H}px;margin:0 auto;">`;
       if (showHP) {
         const rc = heating ? hot : idle, fc = heating ? cold : idle;
         const inner = tankL - 8, outer = tankL - 15;
-        // Return (inner): heat pump side, lower -> tank top
-        out += pipe(inner, 40, 4, retY - 38, rc) + pipe(inner, retY - 2, tankL + 2 - inner, 4, rc) + pipe(inner, 38, hpL + 2 - inner, 4, rc);
-        // Flow (outer): tank bottom -> heat pump side, higher
-        out += pipe(outer, 16, 4, flowY - 14, fc) + pipe(outer, flowY - 2, tankL + 2 - outer, 4, fc) + pipe(outer, 14, hpL + 2 - outer, 4, fc);
+        // Return (inner, hot): heat pump -> down -> tank top
+        out += pipe(inner, 40, 4, retY - 38, rc, 'hwdown') + pipe(inner, retY - 2, tankL + 2 - inner, 4, rc, 'hwright')
+             + pipe(inner, 38, hpL + 2 - inner, 4, rc, 'hwleft');
+        // Flow (outer, cold): tank bottom -> up -> heat pump
+        out += pipe(outer, 16, 4, flowY - 14, fc, 'hwup') + pipe(outer, flowY - 2, tankL + 2 - outer, 4, fc, 'hwleft')
+             + pipe(outer, 14, hpL + 2 - outer, 4, fc, 'hwright');
       }
       // Tank body with its five layers, filling from the top
       out += `<div style="position:absolute;left:${tankL}px;top:${tankT}px;width:${tankW}px;height:${tankH}px;
                border:4px solid ${line};border-radius:${Math.round(tankW / 2)}px / 14px;overflow:hidden;
                background:var(--card-background-color);display:flex;flex-direction:column;gap:3px;padding:4px;box-sizing:border-box;">`;
+      // Layer (1 = top, 5 = bottom) that contains the real tank sensor
+      const senBar = Math.min(5, Math.max(1, Math.ceil((1 - smm / hmm) * 5)));
       for (let p = 1; p <= 5; p++) {
         let c;
         if (p <= bars) {
           c = (p === bars && bars < 5) ? '#fb8c00' : hot;
+        } else if (p === senBar) {
+          c = sensorTint;                       // measured by the real sensor
+        } else if (p > senBar) {
+          c = 'rgba(30,136,229,0.45)';          // below the sensor: coldest water
         } else {
-          c = (p === 5) ? bottomCold : 'rgba(30,136,229,0.25)';
+          c = 'rgba(30,136,229,0.25)';          // above the sensor, not hot
         }
         out += `<div style="flex:1;background:${c};border-radius:3px;"></div>`;
       }
@@ -78,6 +110,12 @@ custom_fields:
                border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:6px solid ${line};"></div>`;
       out += `<ha-icon icon="mdi:thermometer" title="Tank sensor (${smm} mm)" style="position:absolute;left:${x + 2}px;
                top:${senY - 10}px;--mdc-icon-size:20px;color:var(--secondary-text-color);"></ha-icon>`;
+      const wt = states[variables.water_temp_entity]?.state;
+      if (wt !== undefined && !['unknown','unavailable'].includes(wt)) {
+        out += `<div style="position:absolute;left:${tankL + 5}px;width:${x - 16 - (tankL + 5)}px;top:${senY - 8}px;
+                 text-align:right;font-size:12px;font-weight:600;white-space:nowrap;color:#fff;
+                 text-shadow:0 0 3px #000, 0 0 2px #000;">${Number(wt).toFixed(1)}°</div>`;
+      }
       if (showHP) {
         // Heat pump (EHPE-4550P-A, 825 x 675 mm), centred above the tank
         out += `<div style="position:absolute;left:${hpL}px;top:0;width:72px;height:59px;border:3px solid ${line};
@@ -113,11 +151,10 @@ custom_fields:
         const h = Math.round((Date.now() - new Date(last)) / 3600000);
         since = h < 1 ? 'under an hour ago' : `${h} h ago`;
       }
-      let t = `<div style="text-align:left;line-height:1.5;">
-        <div style="font-size:28px;font-weight:600;">${s('sensor.reclaim_tank_charge')}%
-          <span style="font-size:16px;font-weight:400;"> ${s('sensor.reclaim_tank_status')}${conf === 'lower' ? ' (approx.)' : ''}</span></div>
+      let t = `<div style="text-align:left;line-height:1.45;font-size:var(--ha-font-size-m, 14px);min-width:0;overflow-wrap:anywhere;">
+        <div style="font-size:var(--ha-font-size-2xl, 24px);font-weight:600;padding-right:104px;">${s('sensor.reclaim_tank_charge')}%
+          <span style="font-size:var(--ha-font-size-m, 14px);font-weight:400;"> ${s('sensor.reclaim_tank_status')}${conf === 'lower' ? ' (approx.)' : ''}</span></div>
         <div>🚿 About <b>${s('sensor.reclaim_tank_showers_left')}</b> showers (${s('sensor.reclaim_tank_litres')} L)</div>
-        <div>🌡️ Tank sensor ${s(variables.water_temp_entity)} °C</div>
         <div>⚡ Top up: ${num('sensor.reclaim_tank_top_up_energy', 2)} kWh${ok(topCost) ? ` (≈ $${Number(topCost).toFixed(2)} now)` : ''}</div>
         <div>💧 ${s('sensor.reclaim_tank_draws_since_full')} draws since full${since ? `, full ${since}` : ''}</div>`;
       if (s('binary_sensor.reclaim_full_heat_overdue') === 'on') {
@@ -131,11 +168,117 @@ custom_fields:
         const runCost = states['sensor.reclaim_heat_pump_cost_today']?.attributes?.run_cost;
         const priced = ok(topCost);
         t += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--divider-color);">
-          <div>♨️ Heat pump: <b>${heating ? 'running' : 'idle'}</b>${heating && !isNaN(pw) ? ` · ${pw.toLocaleString()} W` : ''}
-            · efficiency ≈ ${s('sensor.reclaim_heat_pump_efficiency_estimate')}</div>
+          <div>♨️ Heat pump: <b>${heating ? 'running' : 'idle'}</b>${heating && !isNaN(pw) ? ` · ${pw.toLocaleString()} W` : ''}</div>
+          <div>Efficiency ≈ ${s('sensor.reclaim_heat_pump_efficiency_estimate')}</div>
           <div>${heating ? 'This run' : 'Last run'}: ${ok(s('sensor.reclaim_heat_pump_run_energy')) ? `${num('sensor.reclaim_heat_pump_run_energy', 2)} kWh${priced && runCost !== undefined ? ` (≈ $${Number(runCost).toFixed(2)})` : ''}` : 'no run recorded yet'}</div>
           <div>Today: ${num('sensor.reclaim_heat_pump_energy_today', 2)} kWh${priced ? ` (≈ $${num('sensor.reclaim_heat_pump_cost_today', 2)})` : ''}</div>
         </div>`;
       }
       return t + '</div>';
     ]]]
+  boost:
+    card:
+      type: custom:button-card
+      entity: switch.reclaim_v2_boost  # EDIT: your Reclaim boost switch
+      name: Boost
+      icon: mdi:rocket-launch
+      layout: icon_name
+      show_state: false
+      tap_action:
+        action: toggle
+        confirmation:
+          text: Start or cancel a boost heat? (A boost overrides the timer until the tank is full.)
+      styles:
+        card:
+          - padding: 4px 12px
+          - border-radius: 16px
+          - box-shadow: none
+          - border: 1px solid var(--divider-color)
+          - width: auto
+          - min-width: 100px
+        grid:
+          - grid-template-columns: 22px auto
+        name:
+          - font-size: 13px
+          - padding-left: 6px
+          - overflow: visible
+          - white-space: nowrap
+          - text-overflow: clip
+        icon:
+          - width: 18px
+      state:
+        - value: "on"
+          styles:
+            card:
+              - background: rgba(229, 57, 53, 0.15)
+              - border: 1px solid rgba(229, 57, 53, 0.6)
+            icon:
+              - color: "#e53935"
+  graph:
+    card:
+      type: custom:apexcharts-card
+      graph_span: 24h
+      header:
+        show: false
+      apex_config:
+        chart:
+          height: 160
+        legend:
+          show: true
+          position: top
+          fontSize: 12px
+        tooltip:
+          x:
+            format: HH:mm
+      yaxis:
+        - id: pct
+          min: 0
+          max: 100
+          decimals: 0
+          apex_config:
+            tickAmount: 4
+            title:
+              text: Charge %
+        - id: temp
+          opposite: true
+          min: 10
+          max: 70
+          decimals: 0
+          apex_config:
+            tickAmount: 4
+            title:
+              text: Tank sensor °C
+        - id: hp
+          show: false
+          min: 0
+          max: 1
+      series:
+        - entity: binary_sensor.reclaim_v2_heat_pump_state  # EDIT
+          name: Heating
+          yaxis_id: hp
+          type: area
+          curve: stepline
+          color: "#43a047"
+          opacity: 0.15
+          stroke_width: 0
+          transform: "return x === 'on' ? 1 : 0;"
+        - entity: sensor.reclaim_tank_charge
+          name: Charge
+          yaxis_id: pct
+          type: area
+          curve: smooth
+          color: "#e53935"
+          opacity: 0.25
+          stroke_width: 2
+          group_by:
+            func: last
+            duration: 10min
+        - entity: sensor.reclaim_v2_water_temperature  # EDIT
+          name: Tank sensor
+          yaxis_id: temp
+          type: line
+          color: "#1e88e5"
+          stroke_width: 1.5
+          group_by:
+            func: avg
+            duration: 10min
