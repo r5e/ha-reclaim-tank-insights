@@ -10,6 +10,8 @@ by David Collett. It turns the Reclaim heat pump's data into an estimate of **ho
 is actually left in your tank**, with a dashboard card that draws your tank and heat pump.
 
 ![Reclaim tank card](docs/card.png)
+<img width="741" height="691" alt="image" src="https://github.com/user-attachments/assets/199ab90b-bd62-4ab7-baa6-823145fcd17e" />
+(note some progress shown between the 2 images while things are developing)
 
 Not affiliated with or endorsed by Reclaim Energy.
 
