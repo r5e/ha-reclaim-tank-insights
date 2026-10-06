@@ -9,6 +9,7 @@ A companion to the [Reclaim Energy integration](https://github.com/david-collett
 by David Collett. It turns the Reclaim heat pump's data into an estimate of **how much hot water
 is actually left in your tank**, with a dashboard card that draws your tank and heat pump.
 
+<img width="356" height="383" alt="HATankInsights52ChargeAnim-50pct" src="https://github.com/user-attachments/assets/4e716ae0-55c9-4865-9242-4925bd57dab2" />
 <img src="docs/card.png" alt="Reclaim tank card" width="371">
 <img width="370" alt="Reclaim tank card, later version" src="https://github.com/user-attachments/assets/199ab90b-bd62-4ab7-baa6-823145fcd17e" />
 
